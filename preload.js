@@ -11,5 +11,8 @@ contextBridge.exposeInMainWorld('hal', {
   listWindowsPrinters: () => ipcRenderer.invoke('printer:listWindows'),
   rawTestPrint: (opts) => ipcRenderer.invoke('printer:rawTestPrint', opts),
 
+  k80ListDevices: () => ipcRenderer.invoke('printer:k80ListDevices'),
+  k80Init: () => ipcRenderer.invoke('printer:k80Init'),
+
   onLog: (cb) => ipcRenderer.on('log', (_e, line) => cb(line)),
 });

@@ -31,16 +31,19 @@ document.getElementById('refreshPorts').onclick = refreshPortLists;
 refreshPortLists();
 
 // ---------- Recycler ----------
+// Connects via the nv200-smart-payout sidecar service (spawned in main.js),
+// not directly - see integration summary. Encryption is always-on in that
+// service's startup(), so there's no encryption toggle here anymore.
 document.getElementById('connectRecycler').onclick = async () => {
   const port = document.getElementById('recyclerPort').value;
-  const useEncryption = document.getElementById('useEncryption').checked;
   if (!port) { log('[recycler] no port selected'); return; }
   setDot('recyclerDot', 'pending');
-  log(`[recycler] connecting on ${port}...`);
-  const result = await window.hal.connectRecycler({ port, useEncryption });
+  log(`[recycler] starting recycler service on ${port}...`);
+  const result = await window.hal.connectRecycler({ port });
   if (result.ok) {
     setDot('recyclerDot', 'ok');
-    document.getElementById('recyclerValue').textContent = `Connected - serial ${result.serialNumber}`;
+    document.getElementById('recyclerValue').textContent =
+      `Connected - protocol v${result.protocolVersion}, unit "${result.unitType}"`;
   } else {
     setDot('recyclerDot', 'err');
     document.getElementById('recyclerValue').textContent = `Failed: ${result.error}`;
@@ -84,6 +87,31 @@ document.getElementById('rawTestPrint').onclick = async () => {
   el.textContent = 'Sending...';
   const result = await window.hal.rawTestPrint({ port });
   el.textContent = result.ok ? 'Raw ESC/POS test sent - check the physical printout.' : `Failed: ${result.error}`;
+};
+
+// ---------- Printer: K80 raw-USB diagnostics (new, via custom-k80-printer's CLI) ----------
+document.getElementById('k80List').onclick = async () => {
+  const el = document.getElementById('k80Value');
+  setDot('k80Dot', 'pending');
+  el.textContent = 'Listing USB devices...';
+  const result = await window.hal.k80ListDevices();
+  if (!result.ok) {
+    setDot('k80Dot', 'err');
+    el.textContent = `Error: ${result.error}`;
+    return;
+  }
+  setDot('k80Dot', result.foundTarget ? 'ok' : 'err');
+  el.textContent = result.foundTarget
+    ? 'K80 found on USB (VID 0x0DD4 / PID 0x0237).'
+    : 'K80 not found among visible USB devices.';
+};
+document.getElementById('k80Init').onclick = async () => {
+  const el = document.getElementById('k80Value');
+  setDot('k80Dot', 'pending');
+  el.textContent = 'Sending ESC @...';
+  const result = await window.hal.k80Init();
+  setDot('k80Dot', result.ok ? 'ok' : 'err');
+  el.textContent = result.ok ? 'ESC @ sent OK.' : `Error: ${result.error}`;
 };
 
 // ---------- Camera ----------

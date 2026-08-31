@@ -7,7 +7,7 @@
     "start": "electron ."
   },
   "dependencies": {
-    "encrypted-smiley-secure-protocol": "^1.0.0",
+    "eventsource": "^2.0.2",
     "serialport": "^12.0.0"
   },
   "devDependencies": {

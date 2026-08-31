@@ -37,9 +37,7 @@
       <select id="recyclerPort"></select>
       <button class="secondary" id="refreshPorts">Refresh</button>
     </div>
-    <div class="row">
-      <label class="muted"><input type="checkbox" id="useEncryption" /> eSSP (encrypted)</label>
-    </div>
+    <div class="muted">Encrypted eSSP handshake (always on via the recycler service).</div>
     <div class="row">
       <button id="connectRecycler">Connect</button>
       <button class="secondary" id="disconnectRecycler">Disconnect</button>
@@ -58,6 +56,12 @@
       <button id="rawTestPrint">Raw ESC/POS test print</button>
     </div>
     <div class="value" id="printerRawValue"></div>
+    <div class="row" style="margin-top:10px;">
+      <span class="dot pending" id="k80Dot"></span>
+      <button id="k80List">K80: list USB devices</button>
+      <button id="k80Init">K80: connectivity test</button>
+    </div>
+    <div class="value" id="k80Value"></div>
   </div>
 
   <div class="card">
