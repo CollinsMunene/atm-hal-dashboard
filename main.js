@@ -53,7 +53,7 @@ ipcMain.handle('recycler:connect', async (event, { port, useEncryption, fixedKey
           const serial = await eSSP.command('GET_SERIAL_NUMBER');
           await eSSP.enable();
           send('recycler:status', { connected: true, serialNumber: serial.info.serial_number, enabled: true });
-          send('log', `[recycler] connected — serial ${serial.info.serial_number}`);
+          send('log', `[recycler] connected - serial ${serial.info.serial_number}`);
           resolve({ ok: true, serialNumber: serial.info.serial_number });
         } catch (err) {
           send('recycler:status', { connected: false, error: err.message });
@@ -62,7 +62,7 @@ ipcMain.handle('recycler:connect', async (event, { port, useEncryption, fixedKey
         }
       });
 
-      // Event stream — these fire continuously once enabled; forward all of them to the dashboard log + status
+      // Event stream - these fire continuously once enabled; forward all of them to the dashboard log + status
       const forward = (name) => eSSP.on(name, (result) => {
         send('log', `[recycler] ${name} ${result ? JSON.stringify(result) : ''}`);
         send('recycler:event', { name, result });

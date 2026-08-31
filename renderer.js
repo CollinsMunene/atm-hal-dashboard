@@ -25,7 +25,7 @@ async function refreshPortLists() {
     recyclerSelect.appendChild(new Option(label, p.path));
     printerSelect.appendChild(new Option(label, p.path));
   });
-  if (ports.length === 0) log('[ports] no serial ports found — check connections');
+  if (ports.length === 0) log('[ports] no serial ports found - check connections');
 }
 document.getElementById('refreshPorts').onclick = refreshPortLists;
 refreshPortLists();
@@ -40,7 +40,7 @@ document.getElementById('connectRecycler').onclick = async () => {
   const result = await window.hal.connectRecycler({ port, useEncryption });
   if (result.ok) {
     setDot('recyclerDot', 'ok');
-    document.getElementById('recyclerValue').textContent = `Connected — serial ${result.serialNumber}`;
+    document.getElementById('recyclerValue').textContent = `Connected - serial ${result.serialNumber}`;
   } else {
     setDot('recyclerDot', 'err');
     document.getElementById('recyclerValue').textContent = `Failed: ${result.error}`;
@@ -70,7 +70,7 @@ document.getElementById('checkWindowsPrinter').onclick = async () => {
     el.textContent = 'No printers found in Windows.';
     return;
   }
-  const lines = result.printers.map(p => `${p.Name} — status ${p.PrinterStatus} — offline: ${p.WorkOffline}`);
+  const lines = result.printers.map(p => `${p.Name} - status ${p.PrinterStatus} - offline: ${p.WorkOffline}`);
   el.textContent = lines.join(' | ');
   const anyOffline = result.printers.some(p => p.WorkOffline);
   setDot('printerDot', anyOffline ? 'err' : 'ok');
@@ -83,7 +83,7 @@ document.getElementById('rawTestPrint').onclick = async () => {
   const el = document.getElementById('printerRawValue');
   el.textContent = 'Sending...';
   const result = await window.hal.rawTestPrint({ port });
-  el.textContent = result.ok ? 'Raw ESC/POS test sent — check the physical printout.' : `Failed: ${result.error}`;
+  el.textContent = result.ok ? 'Raw ESC/POS test sent - check the physical printout.' : `Failed: ${result.error}`;
 };
 
 // ---------- Camera ----------
@@ -93,7 +93,7 @@ document.getElementById('startCamera').onclick = async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true });
     document.getElementById('cameraPreview').srcObject = stream;
     setDot('cameraDot', 'ok');
-    log('[camera] preview started — UVC access confirmed from Electron');
+    log('[camera] preview started - UVC access confirmed from Electron');
   } catch (err) {
     setDot('cameraDot', 'err');
     log(`[camera] failed: ${err.message}`);
