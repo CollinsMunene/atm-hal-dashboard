@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>ATM HAL Dashboard</title>
+<style>
+  :root { --ok:#2E7D32; --err:#C62828; --pending:#B45309; --bg:#111418; --card:#1B2028; --border:#2A303C; --text:#E5E7EB; --muted:#8B93A1; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font-family: -apple-system, Segoe UI, Roboto, sans-serif; }
+  h1 { font-size: 20px; padding: 16px 20px 0; margin:0; }
+  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; padding:20px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; }
+  .card h2 { margin:0 0 10px; font-size:15px; display:flex; align-items:center; gap:8px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); display:inline-block; }
+  .dot.ok { background:var(--ok); } .dot.err { background:var(--err); } .dot.pending { background:var(--pending); }
+  .row { display:flex; gap:8px; margin-bottom:8px; align-items:center; }
+  select, input, button { background:#0F1216; color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:13px; }
+  button { cursor:pointer; background:#2563EB; border:none; }
+  button:hover { background:#1D4ED8; }
+  button.secondary { background:#0F1216; border:1px solid var(--border); }
+  .muted { color:var(--muted); font-size:12px; }
+  .value { font-size:13px; margin-top:6px; }
+  #touchTile { height:80px; display:flex; align-items:center; justify-content:center; border:2px dashed var(--border); border-radius:8px; font-size:14px; user-select:none; transition: background 0.15s; }
+  #touchTile.hit { background:var(--ok); border-color:var(--ok); }
+  video { width:100%; border-radius:8px; background:#000; margin-top:8px; }
+  #log { grid-column: 1 / -1; background:#0B0D10; border:1px solid var(--border); border-radius:10px; padding:12px; height:180px; overflow-y:auto; font-family: Consolas, monospace; font-size:12px; color:#9CDCFE; }
+  #log div { margin-bottom:2px; }
+</style>
+</head>
+<body>
+<h1>ATM HAL Dashboard</h1>
+<div class="grid">
+
+  <div class="card">
+    <h2><span class="dot pending" id="recyclerDot"></span> Cash Recycler (SSP/eSSP)</h2>
+    <div class="row">
+      <select id="recyclerPort"></select>
+      <button class="secondary" id="refreshPorts">Refresh</button>
+    </div>
+    <div class="row">
+      <label class="muted"><input type="checkbox" id="useEncryption" /> eSSP (encrypted)</label>
+    </div>
+    <div class="row">
+      <button id="connectRecycler">Connect</button>
+      <button class="secondary" id="disconnectRecycler">Disconnect</button>
+    </div>
+    <div class="value" id="recyclerValue">Not connected.</div>
+  </div>
+
+  <div class="card">
+    <h2><span class="dot pending" id="printerDot"></span> Receipt Printer</h2>
+    <div class="row">
+      <button id="checkWindowsPrinter">Check Windows spooler</button>
+    </div>
+    <div class="value" id="printerWinValue">Not checked yet.</div>
+    <div class="row" style="margin-top:10px;">
+      <select id="printerPort"></select>
+      <button id="rawTestPrint">Raw ESC/POS test print</button>
+    </div>
+    <div class="value" id="printerRawValue"></div>
+  </div>
+
+  <div class="card">
+    <h2><span class="dot pending" id="cameraDot"></span> Camera (UVC)</h2>
+    <div class="row"><button id="startCamera">Start preview</button></div>
+    <video id="cameraPreview" autoplay muted></video>
+  </div>
+
+  <div class="card">
+    <h2><span class="dot pending" id="touchDot"></span> Touchscreen / Input</h2>
+    <div class="muted">Tap or click the box below — it should flash green immediately.</div>
+    <div id="touchTile" style="margin-top:10px;">Tap here</div>
+    <div class="value" id="touchValue">Taps registered: 0</div>
+  </div>
+
+  <div id="log"></div>
+</div>
+
+<script src="renderer.js"></script>
+</body>
+</html>

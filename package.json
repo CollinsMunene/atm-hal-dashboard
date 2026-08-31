@@ -1,0 +1,16 @@
+{
+  "name": "atm-hal-dashboard",
+  "version": "0.1.0",
+  "description": "Hardware bring-up dashboard for the Custom ATM Platform - recycler, printer, camera, touch status",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "encrypted-smiley-secure-protocol": "^1.0.0",
+    "serialport": "^12.0.0"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0"
+  }
+}
