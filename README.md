@@ -35,10 +35,19 @@ If your checkout doesn't match that layout, or you use something other than
 | Env var             | Default                        | Purpose                                  |
 | -------------------- | ------------------------------- | ----------------------------------------- |
 | `NV200_SERVICE_DIR`  | `../nv200-smart-payout`         | Where `server.py` lives                   |
-| `NV200_PYTHON`       | `python3`                       | Interpreter used to launch it             |
+| `NV200_PYTHON`       | auto-detected (see below)       | Interpreter used to launch it             |
 | `NV200_HTTP_PORT`    | `8787`                          | Port the recycler service listens on      |
 | `K80_SERVICE_DIR`    | `../custom-k80-printer`         | Where `test_k80.py` lives                 |
-| `K80_PYTHON`         | `python3`                       | Interpreter used to run it                |
+| `K80_PYTHON`         | auto-detected (see below)       | Interpreter used to run it                |
+
+If `NV200_PYTHON`/`K80_PYTHON` aren't set, `main.js` probes candidates in order
+until one actually runs (`py`, `python`, `python3` on Windows;
+`python3`, `python` elsewhere) and caches whichever works. This exists because
+Windows' `python`/`python3` commands are often just Microsoft Store
+app-execution-alias stubs that print "Python was not found..." and exit
+instead of running anything, even when a real interpreter (e.g. installed via
+python.org, or the `py` launcher) is present under a different name. If every
+candidate fails, set the env var explicitly to the interpreter's actual path.
 
 ## Setup (Windows)
 

@@ -9,13 +9,52 @@ const EventSource = require('eventsource');
 // sibling directories next to this repo (confirmed true in this workspace).
 // Override via env vars if that's not the case on a given machine.
 const NV200_SERVICE_DIR = process.env.NV200_SERVICE_DIR || path.join(__dirname, '..', 'nv200-smart-payout');
-const NV200_PYTHON = process.env.NV200_PYTHON || 'python3';
 const NV200_HTTP_HOST = '127.0.0.1';
 const NV200_HTTP_PORT = process.env.NV200_HTTP_PORT || '8787'; // server.py's own default
 const NV200_BASE_URL = `http://${NV200_HTTP_HOST}:${NV200_HTTP_PORT}`;
 
 const K80_SERVICE_DIR = process.env.K80_SERVICE_DIR || path.join(__dirname, '..', 'custom-k80-printer');
-const K80_PYTHON = process.env.K80_PYTHON || 'python3';
+
+// ---------- Python interpreter resolution ----------
+// 'python3' is the right default on macOS/Linux, but on Windows it's frequently
+// just the Microsoft Store app-execution-alias stub (which exits immediately
+// with "Python was not found..." instead of running anything) even when a real
+// Python is installed under a different name. Probe a platform-appropriate list
+// of candidates and cache whichever one actually runs, so both sidecars work
+// without every machine needing NV200_PYTHON/K80_PYTHON set by hand. An
+// explicit env var override always wins and is never probed.
+const PYTHON_CANDIDATES = process.platform === 'win32'
+  ? ['py', 'python', 'python3']
+  : ['python3', 'python'];
+const resolvedPythonCache = {};
+
+function canRunPython(cmd) {
+  return new Promise((resolve) => {
+    execFile(cmd, ['--version'], { windowsHide: true, timeout: 5000 }, (err) => resolve(!err));
+  });
+}
+
+async function resolvePython(envVarName) {
+  if (resolvedPythonCache[envVarName]) return resolvedPythonCache[envVarName];
+
+  const override = process.env[envVarName];
+  if (override) {
+    resolvedPythonCache[envVarName] = override;
+    return override;
+  }
+
+  for (const candidate of PYTHON_CANDIDATES) {
+    if (await canRunPython(candidate)) {
+      resolvedPythonCache[envVarName] = candidate;
+      return candidate;
+    }
+  }
+
+  // Nothing on PATH actually runs - fall back to the first candidate so the
+  // resulting ENOENT/stub error at least names what was tried.
+  resolvedPythonCache[envVarName] = PYTHON_CANDIDATES[0];
+  return PYTHON_CANDIDATES[0];
+}
 
 let mainWindow;
 let recyclerProc = null;
@@ -92,7 +131,9 @@ ipcMain.handle('recycler:connect', async (event, { port }) => {
   let stderrTail = '';
 
   try {
-    recyclerProc = spawn(NV200_PYTHON, ['server.py'], {
+    const nv200Python = await resolvePython('NV200_PYTHON');
+    send('log', `[recycler-svc] using python interpreter: ${nv200Python}`);
+    recyclerProc = spawn(nv200Python, ['server.py'], {
       cwd: NV200_SERVICE_DIR,
       env: {
         ...process.env,
@@ -210,9 +251,10 @@ ipcMain.handle('printer:rawTestPrint', async (event, { port }) => {
 // ---------- Printer: K80 raw-USB diagnostics (new - shells out to custom-k80-printer's
 // staged CLI, test_k80.py, since that package has no HTTP layer of its own; see the
 // integration summary for why this wasn't built as an HTTP client instead) ----------
-function runK80Test(args) {
+async function runK80Test(args) {
+  const k80Python = await resolvePython('K80_PYTHON');
   return new Promise((resolve) => {
-    execFile(K80_PYTHON, ['test_k80.py', ...args], { cwd: K80_SERVICE_DIR, timeout: 15000 }, (err, stdout, stderr) => {
+    execFile(k80Python, ['test_k80.py', ...args], { cwd: K80_SERVICE_DIR, timeout: 15000 }, (err, stdout, stderr) => {
       if (err) {
         resolve({ ok: false, error: (stderr || err.message).trim(), output: (stdout || '').trim() });
         return;
