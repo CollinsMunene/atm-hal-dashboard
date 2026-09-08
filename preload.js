@@ -1,11 +1,24 @@
 const { contextBridge, ipcRenderer } = require('electron');
-const jsQR = require('jsqr');
+
+// Loaded defensively: if `npm install` hasn't picked up this dependency yet,
+// a hard `require('jsqr')` here would throw and take down preload.js
+// entirely - which silently breaks window.hal for every peripheral, not
+// just the QR scanner. Fail soft instead: only QR decoding is unavailable.
+let jsQR = null;
+try {
+  jsQR = require('jsqr');
+} catch (err) {
+  console.error('[preload] jsqr not available (run `npm install`?):', err.message);
+}
 
 contextBridge.exposeInMainWorld('hal', {
   // Renderer has no Node access (contextIsolation/nodeIntegration off), so
   // the QR decode itself happens here in preload (which does have Node
   // access) - the renderer just hands over raw pixel data from a canvas.
-  decodeQR: (pixels, width, height) => jsQR(pixels, width, height),
+  decodeQR: (pixels, width, height) => {
+    if (!jsQR) throw new Error("jsqr not installed - run 'npm install' and restart");
+    return jsQR(pixels, width, height);
+  },
   listPorts: () => ipcRenderer.invoke('ports:list'),
 
   connectRecycler: (opts) => ipcRenderer.invoke('recycler:connect', opts),
