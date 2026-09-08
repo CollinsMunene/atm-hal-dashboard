@@ -11,10 +11,26 @@ function setDot(id, state) { // state: 'ok' | 'err' | 'pending'
   el.className = 'dot ' + state;
 }
 
-window.hal.onLog((line) => log(line));
+// window.hal comes from preload.js via contextBridge - if preload throws for
+// any reason (missing dependency, syntax error, etc.) this is undefined, and
+// since this is the first top-level statement in the file, a bare
+// `window.hal.onLog(...)` here would throw synchronously and abort the rest
+// of this script - meaning NOT ONE button below gets its onclick attached,
+// including ones like Touch/Camera that don't even use window.hal. Guard it
+// and surface the failure visibly instead of failing silently/totally.
+if (!window.hal) {
+  document.body.insertAdjacentHTML('afterbegin',
+    '<div style="background:#C62828;color:#fff;padding:10px 16px;font-family:sans-serif;font-size:13px;">' +
+    '<strong>preload.js failed to load - window.hal is undefined.</strong> Every button in this app depends on it, ' +
+    'so nothing will respond. Open DevTools (Ctrl+Shift+I / Cmd+Opt+I) and check the Console for the actual error - ' +
+    'a missing dependency (try <code>npm install</code> and restart) is the most common cause.' +
+    '</div>');
+}
+window.hal?.onLog((line) => log(line));
 
 // ---------- Port lists ----------
 async function refreshPortLists() {
+  if (!window.hal) { log('[ports] window.hal unavailable - preload.js failed to load'); return; }
   const ports = await window.hal.listPorts();
   const recyclerSelect = document.getElementById('recyclerPort');
   const printerSelect = document.getElementById('printerPort');
