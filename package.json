@@ -8,7 +8,6 @@
   },
   "dependencies": {
     "eventsource": "^2.0.2",
-    "jsqr": "^1.4.0",
     "serialport": "^12.0.0"
   },
   "devDependencies": {

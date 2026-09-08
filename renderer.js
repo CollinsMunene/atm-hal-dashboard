@@ -1,11 +1,40 @@
-function log(line) {
+// Logging is opt-in: lines are always captured into a capped in-memory
+// buffer (so nothing's lost), but only rendered into the DOM while "Show
+// live log" is ticked - the panel doesn't grow/scroll continuously unless
+// asked to. Per-action results (recyclerValue, k80Value, etc.) still show
+// immediately regardless of this toggle; this only affects the bottom trace.
+let loggingEnabled = false;
+let logBuffer = [];
+const LOG_BUFFER_MAX = 500;
+
+function appendLogLine(entry) {
   const el = document.getElementById('log');
   const div = document.createElement('div');
-  const time = new Date().toLocaleTimeString();
-  div.textContent = `[${time}] ${line}`;
+  div.textContent = entry;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
 }
+function log(line) {
+  const entry = `[${new Date().toLocaleTimeString()}] ${line}`;
+  logBuffer.push(entry);
+  if (logBuffer.length > LOG_BUFFER_MAX) logBuffer.shift();
+  if (loggingEnabled) appendLogLine(entry);
+}
+document.getElementById('logToggle').onchange = (e) => {
+  loggingEnabled = e.target.checked;
+  const el = document.getElementById('log');
+  el.innerHTML = '';
+  if (loggingEnabled) {
+    logBuffer.forEach(appendLogLine);
+  } else {
+    el.textContent = 'Logging is off - tick "Show live log" above to view activity as it happens.';
+  }
+};
+document.getElementById('logClear').onclick = () => {
+  logBuffer = [];
+  document.getElementById('log').innerHTML = '';
+};
+
 function setDot(id, state) { // state: 'ok' | 'err' | 'pending'
   const el = document.getElementById(id);
   el.className = 'dot ' + state;
@@ -29,17 +58,15 @@ if (!window.hal) {
 window.hal?.onLog((line) => log(line));
 
 // ---------- Port lists ----------
+// Only the recycler needs a COM port now - the K80 talks raw USB, not serial.
 async function refreshPortLists() {
   if (!window.hal) { log('[ports] window.hal unavailable - preload.js failed to load'); return; }
   const ports = await window.hal.listPorts();
   const recyclerSelect = document.getElementById('recyclerPort');
-  const printerSelect = document.getElementById('printerPort');
   recyclerSelect.innerHTML = '';
-  printerSelect.innerHTML = '';
   ports.forEach(p => {
     const label = `${p.path} (${p.manufacturer})`;
     recyclerSelect.appendChild(new Option(label, p.path));
-    printerSelect.appendChild(new Option(label, p.path));
   });
   if (ports.length === 0) log('[ports] no serial ports found - check connections');
 }
@@ -52,6 +79,18 @@ refreshPortLists();
 // service's startup(), so there's no encryption toggle here anymore.
 let recyclerCountryCode = 'USD';
 let recyclerConnected = false;
+let recyclerChannelValue = null; // real-currency value per note channel, from /status
+let recyclerBalance = null;      // real-currency total, from the last "Check balance"
+let sessionDeposits = 0;         // running total of CREDIT_NOTE values this session
+
+function updateDepositDisplay() {
+  document.getElementById('depositValue').textContent =
+    `Session deposits: ${sessionDeposits} ${recyclerCountryCode}`;
+}
+document.getElementById('resetDepositBtn').onclick = () => {
+  sessionDeposits = 0;
+  updateDepositDisplay();
+};
 
 document.getElementById('connectRecycler').onclick = async () => {
   const port = document.getElementById('recyclerPort').value;
@@ -64,6 +103,10 @@ document.getElementById('connectRecycler').onclick = async () => {
     document.getElementById('recyclerValue').textContent =
       `Connected - protocol v${result.protocolVersion}, unit "${result.unitType}"`;
     recyclerConnected = true;
+    sessionDeposits = 0;
+    recyclerBalance = null;
+    document.getElementById('balanceValue').textContent = '';
+    updateDepositDisplay();
   } else {
     setDot('recyclerDot', 'err');
     document.getElementById('recyclerValue').textContent = `Failed: ${result.error}`;
@@ -75,20 +118,38 @@ document.getElementById('disconnectRecycler').onclick = async () => {
   setDot('recyclerDot', 'pending');
   document.getElementById('recyclerValue').textContent = 'Disconnected.';
   document.getElementById('denominationsValue').textContent = '';
+  document.getElementById('balanceValue').textContent = '';
   recyclerConnected = false;
+  recyclerBalance = null;
 };
 window.hal.onRecyclerEvent(({ name, result }) => {
   document.getElementById('recyclerValue').textContent = `Last event: ${name}`;
+  // Cash deposit tracking: CREDIT_NOTE carries a channel number, not a
+  // currency value directly - look its real value up in channel_value
+  // (from /status, already real-currency per SETUP_REQUEST's
+  // expanded_channel_value - see nv200-smart-payout's client.py).
+  if (name === 'CREDIT_NOTE' && recyclerChannelValue && result.channel) {
+    const value = recyclerChannelValue[result.channel - 1];
+    if (value != null) {
+      sessionDeposits += value;
+      updateDepositDisplay();
+      log(`[recycler] deposit credited: ${value} ${recyclerCountryCode} (channel ${result.channel})`);
+    }
+  }
 });
 window.hal.onRecyclerStatus((status) => {
-  if (status.connected && status.countryCode) {
-    recyclerCountryCode = status.countryCode;
-    const currencyInput = document.getElementById('payoutCurrency');
-    if (!currencyInput.value) currencyInput.value = recyclerCountryCode;
+  if (status.connected) {
+    if (status.countryCode) {
+      recyclerCountryCode = status.countryCode;
+      const currencyInput = document.getElementById('payoutCurrency');
+      if (!currencyInput.value) currencyInput.value = recyclerCountryCode;
+      updateDepositDisplay();
+    }
+    if (status.channelValue) recyclerChannelValue = status.channelValue;
   }
 });
 
-// ---------- Recycler: denominations ----------
+// ---------- Recycler: denominations + balance ----------
 document.getElementById('refreshDenominations').onclick = async () => {
   const el = document.getElementById('denominationsValue');
   if (!recyclerConnected) { el.textContent = 'Not connected.'; return; }
@@ -101,10 +162,24 @@ document.getElementById('refreshDenominations').onclick = async () => {
     .join(' | ');
 };
 
+document.getElementById('checkBalanceBtn').onclick = async () => {
+  const el = document.getElementById('balanceValue');
+  if (!recyclerConnected) { el.textContent = 'Not connected.'; return; }
+  el.textContent = 'Checking...';
+  const result = await window.hal.getDenominations();
+  if (!result.ok) { el.textContent = `Error: ${result.error}`; return; }
+  const total = result.denominations.reduce((sum, d) => sum + (d.value || 0) * (d.count || 0), 0);
+  recyclerBalance = total;
+  const country = result.denominations[0]?.country_code || recyclerCountryCode;
+  el.textContent = `Balance: ${total} ${country} (available for payout - caps withdrawals below)`;
+};
+
 // ---------- Recycler: cash-moving commands ----------
 // PAYOUT and FLOAT move real cash - confirm before sending unless it's a
 // test-only payout (which the device confirms feasibility for without
-// dispensing anything).
+// dispensing anything). Payout is additionally capped to the last-checked
+// balance so you can't request more than the denominations currently held
+// even before the device's own feasibility check runs.
 document.getElementById('payoutBtn').onclick = async () => {
   const el = document.getElementById('payoutValue');
   const amount = Number(document.getElementById('payoutAmount').value);
@@ -112,6 +187,8 @@ document.getElementById('payoutBtn').onclick = async () => {
   const test = document.getElementById('payoutTest').checked;
   if (!recyclerConnected) { el.textContent = 'Not connected.'; return; }
   if (!amount) { el.textContent = 'Enter an amount.'; return; }
+  if (recyclerBalance == null) { el.textContent = 'Click "Check balance" first, so this can be capped to what\'s actually available.'; return; }
+  if (amount > recyclerBalance) { el.textContent = `Amount exceeds available balance (max ${recyclerBalance} ${currency}).`; return; }
   if (!test && !confirm(`Pay out ${amount} ${currency} for real? This dispenses actual cash.`)) return;
   el.textContent = 'Sending...';
   const result = await window.hal.payout({ amount, currency, test });
@@ -143,38 +220,7 @@ document.getElementById('haltBtn').onclick = async () => {
   el.textContent = result.ok ? `Halt OK: ${JSON.stringify(result.result)}` : `Error: ${result.error}`;
 };
 
-// ---------- Printer: Windows spooler ----------
-document.getElementById('checkWindowsPrinter').onclick = async () => {
-  setDot('printerDot', 'pending');
-  const result = await window.hal.listWindowsPrinters();
-  const el = document.getElementById('printerWinValue');
-  if (!result.ok) {
-    setDot('printerDot', 'err');
-    el.textContent = `Error: ${result.error}`;
-    return;
-  }
-  if (!result.printers.length) {
-    setDot('printerDot', 'err');
-    el.textContent = 'No printers found in Windows.';
-    return;
-  }
-  const lines = result.printers.map(p => `${p.Name} - status ${p.PrinterStatus} - offline: ${p.WorkOffline}`);
-  el.textContent = lines.join(' | ');
-  const anyOffline = result.printers.some(p => p.WorkOffline);
-  setDot('printerDot', anyOffline ? 'err' : 'ok');
-};
-
-// ---------- Printer: raw ESC/POS ----------
-document.getElementById('rawTestPrint').onclick = async () => {
-  const port = document.getElementById('printerPort').value;
-  if (!port) { log('[printer] no port selected for raw test'); return; }
-  const el = document.getElementById('printerRawValue');
-  el.textContent = 'Sending...';
-  const result = await window.hal.rawTestPrint({ port });
-  el.textContent = result.ok ? 'Raw ESC/POS test sent - check the physical printout.' : `Failed: ${result.error}`;
-};
-
-// ---------- Printer: K80 raw-USB diagnostics (new, via custom-k80-printer's CLI) ----------
+// ---------- Printer: K80 raw-USB diagnostics (via custom-k80-printer's CLI) ----------
 document.getElementById('k80List').onclick = async () => {
   const el = document.getElementById('k80Value');
   setDot('k80Dot', 'pending');
@@ -236,12 +282,37 @@ document.getElementById('startCamera').onclick = async () => {
 // ---------- QR Code Scanner ----------
 // Reuses getUserMedia (same as the Camera card) but with its own device
 // picker, since a dedicated QR-scanning camera is often a separate UVC
-// device from the general preview camera. Decoding itself happens in
-// preload.js via jsQR (renderer has no Node access to require it directly).
+// device from the general preview camera. Decoding uses jsQR, vendored as
+// vendor/jsQR.js and loaded as a plain <script> before this file (see
+// index.html) - it's pure JS with no Node dependency, so no need to route
+// it through preload.js/npm at all, which removes an entire class of
+// "did you run npm install" failures for this one feature.
 let qrStream = null;
 let qrScanTimer = null;
 let qrLastDecodeAt = 0;
+let qrLastValue = null;
 const QR_DECODE_INTERVAL_MS = 200;
+const QR_HISTORY_MAX = 20;
+let qrHistoryEntries = [];
+
+function addQrHistory(data) {
+  qrHistoryEntries.unshift({ time: new Date().toLocaleTimeString(), data });
+  if (qrHistoryEntries.length > QR_HISTORY_MAX) qrHistoryEntries.length = QR_HISTORY_MAX;
+  renderQrHistory();
+}
+function renderQrHistory() {
+  const el = document.getElementById('qrHistory');
+  el.innerHTML = '';
+  qrHistoryEntries.forEach(entry => {
+    const div = document.createElement('div');
+    div.textContent = `[${entry.time}] ${entry.data}`; // textContent, not innerHTML - decoded content is untrusted
+    el.appendChild(div);
+  });
+}
+document.getElementById('qrHistoryClear').onclick = () => {
+  qrHistoryEntries = [];
+  renderQrHistory();
+};
 
 async function refreshQrDevices() {
   const select = document.getElementById('qrDeviceSelect');
@@ -272,6 +343,12 @@ document.getElementById('qrStart').onclick = async () => {
   stopQrScan();
   setDot('qrDot', 'pending');
   document.getElementById('qrValue').textContent = 'Starting camera...';
+  if (typeof jsQR !== 'function') {
+    setDot('qrDot', 'err');
+    document.getElementById('qrValue').textContent = 'jsQR failed to load (vendor/jsQR.js missing or blocked) - see DevTools console.';
+    log('[qr] jsQR is not available - check that vendor/jsQR.js exists and loaded before renderer.js');
+    return;
+  }
   const deviceId = document.getElementById('qrDeviceSelect').value;
   try {
     qrStream = await navigator.mediaDevices.getUserMedia({
@@ -282,26 +359,32 @@ document.getElementById('qrStart').onclick = async () => {
     await refreshQrDevices(); // labels are only populated once permission is granted
     document.getElementById('qrValue').textContent = 'Scanning for QR codes...';
     log('[qr] scan started');
+    qrLastValue = null;
 
     const canvas = document.getElementById('qrCanvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-    const tick = async (timestamp) => {
+    const tick = (timestamp) => {
       if (!qrStream) return;
       if (video.videoWidth && timestamp - qrLastDecodeAt >= QR_DECODE_INTERVAL_MS) {
         qrLastDecodeAt = timestamp;
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
         try {
-          const result = await window.hal.decodeQR(imageData.data, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const result = jsQR(imageData.data, canvas.width, canvas.height);
           if (result) {
             setDot('qrDot', 'ok');
             document.getElementById('qrValue').textContent = `Decoded: ${result.data}`;
-            log(`[qr] decoded: ${result.data}`);
+            if (result.data !== qrLastValue) {
+              qrLastValue = result.data;
+              addQrHistory(result.data);
+              log(`[qr] decoded: ${result.data}`);
+            }
           } else {
             setDot('qrDot', 'pending');
+            qrLastValue = null; // code left the frame - allow re-logging it if it reappears
           }
         } catch (err) {
           log(`[qr] decode error: ${err.message}`);

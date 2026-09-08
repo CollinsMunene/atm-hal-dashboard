@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
-const { exec, spawn, execFile } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { SerialPort } = require('serialport');
 const EventSource = require('eventsource');
 
@@ -279,48 +279,7 @@ ipcMain.handle('recycler:smartEmpty', async () => postRecycler('/smart-empty'));
 
 ipcMain.handle('recycler:halt', async () => postRecycler('/halt'));
 
-// ---------- Printer: Windows spooler status ----------
-ipcMain.handle('printer:listWindows', async () => {
-  return new Promise((resolve) => {
-    // PowerShell Get-Printer avoids adding another native-module dependency on top of serialport
-    exec('powershell -Command "Get-Printer | Select-Object Name,PrinterStatus,WorkOffline | ConvertTo-Json"',
-      { windowsHide: true }, (err, stdout) => {
-        if (err) { resolve({ ok: false, error: err.message }); return; }
-        try {
-          let parsed = JSON.parse(stdout || '[]');
-          if (!Array.isArray(parsed)) parsed = [parsed];
-          resolve({ ok: true, printers: parsed });
-        } catch (e) {
-          resolve({ ok: false, error: 'Could not parse printer list: ' + e.message });
-        }
-      });
-  });
-});
-
-// ---------- Printer: raw ESC/POS test print over a serial/USB-serial port ----------
-ipcMain.handle('printer:rawTestPrint', async (event, { port }) => {
-  return new Promise((resolve) => {
-    try {
-      const sp = new SerialPort({ path: port, baudRate: 9600 }, (err) => {
-        if (err) { resolve({ ok: false, error: err.message }); return; }
-
-        const ESC_INIT = Buffer.from([0x1B, 0x40]);               // ESC @ — initialize
-        const TEXT = Buffer.from('ATM HAL Dashboard\nTest print OK\n\n\n', 'ascii');
-        const CUT = Buffer.from([0x1D, 0x56, 0x00]);               // GS V 0 — full cut (adjust if your model differs)
-
-        sp.write(Buffer.concat([ESC_INIT, TEXT, CUT]), (writeErr) => {
-          if (writeErr) { resolve({ ok: false, error: writeErr.message }); sp.close(); return; }
-          send('log', `[printer] raw ESC/POS test sent to ${port}`);
-          sp.close(() => resolve({ ok: true }));
-        });
-      });
-    } catch (err) {
-      resolve({ ok: false, error: err.message });
-    }
-  });
-});
-
-// ---------- Printer: K80 raw-USB diagnostics (new - shells out to custom-k80-printer's
+// ---------- Printer: K80 raw-USB diagnostics (shells out to custom-k80-printer's
 // staged CLI, test_k80.py, since that package has no HTTP layer of its own; see the
 // integration summary for why this wasn't built as an HTTP client instead) ----------
 async function runK80Test(args) {
