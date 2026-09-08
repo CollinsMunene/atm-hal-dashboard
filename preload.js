@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('hal', {
   floatAmount: (opts) => ipcRenderer.invoke('recycler:float', opts),
   smartEmpty: () => ipcRenderer.invoke('recycler:smartEmpty'),
   haltPayout: () => ipcRenderer.invoke('recycler:halt'),
+  rejectNote: () => ipcRenderer.invoke('recycler:rejectNote'),
 
   k80ListDevices: () => ipcRenderer.invoke('printer:k80ListDevices'),
   k80Init: () => ipcRenderer.invoke('printer:k80Init'),

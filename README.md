@@ -99,7 +99,14 @@ npm start
   log for `CREDIT_NOTE`. Disconnect calls `/disable` on the service, then kills
   the sidecar process - if the app quits or crashes without disconnecting first,
   it kills the sidecar too, but check for an orphaned `python server.py` process
-  if something went wrong.
+  if something went wrong. If the sidecar process dies on its own (crashes,
+  the device gets unplugged, etc.) the dashboard now detects it and flips to
+  "Disconnected unexpectedly: ..." with the log auto-shown - it used to stay
+  silently stuck showing "Connected" until some later button click failed with
+  a bare "not connected", which looked like a random failure rather than what
+  it was. If you see that, check the auto-shown log for the `[recycler-svc]`
+  line just before the disconnect - that's the sidecar's own stderr explaining
+  why it exited.
   - **Denominations** - "Refresh denominations" calls the service's
     `GET /denominations` (wraps `SSPClient.denominations()`) and shows known
     denominations with current stock count and cashbox/payout routing, in real
@@ -125,6 +132,24 @@ npm start
     it to move real cash, and you'll get a confirmation prompt first. Float,
     smart-empty, and halt also confirm before sending, since all three act on
     real cash-handling hardware.
+  - **Cancel / return** - two genuinely different capabilities, since the SSP
+    protocol only allows one of them:
+    - **"Reject & return current note"** sends `REJECT_BANKNOTE`, which only
+      works on a note still held in escrow - the brief window between it being
+      read and `CREDIT_NOTE`/`NOTE_STACKED` firing for it. The button is only
+      enabled while the dashboard has seen a `READ_NOTE` with no resolving
+      event yet ("No note currently held in escrow." otherwise). If you're too
+      slow, the device answers `COMMAND_CANNOT_BE_PROCESSED` and the dashboard
+      shows that as an error - it's not a bug, the note is just already
+      stacked.
+    - **"Refund session deposits"** is for that already-stacked case: once
+      credited, a note is physically inside the unit and cannot be un-stacked
+      by any command, so refunding a cancelled transaction means paying out an
+      equivalent amount from the recycler's stock instead (same
+      balance-capped, confirmed `/payout` call as above, pre-filled with the
+      session deposit total) - **not necessarily the same physical notes** the
+      customer inserted. Say that plainly to whoever's using this if you wire
+      it into a real cancel flow.
 - **Printer (K80 raw USB)** - "List USB devices" shells out to
   `test_k80.py --list` and reports whether VID 0x0DD4/PID 0x0237 shows up.
   "Connectivity test" runs `test_k80.py --init` (sends `ESC @` over the native
@@ -160,6 +185,17 @@ turning it on shows recent history, not just what happens from then on;
 
 ## Known open items
 
+- Fixed (not open anymore, noted for context): `nv200-smart-payout`'s
+  `client.command()` used to raise on any failure with nothing catching it in
+  `server.py`, so Flask returned an HTML 500 page that the dashboard's
+  `res.json()` couldn't parse - every payout rejection surfaced as an opaque
+  `Unexpected token '<'` instead of the real reason. There was also a real
+  race: the command lock was non-blocking, so a `/payout` (or any on-demand
+  command) arriving while the background poll loop held it failed instantly
+  with "Already processing another command" instead of just waiting its turn.
+  Both are fixed in `nv200-smart-payout` (a global JSON error handler, and a
+  bounded-wait lock instead of instant-fail) - if payout still fails, the
+  error text should now be the actual device-reported reason.
 - `nv200-smart-payout`'s `/payout` and `/float` endpoints still take raw wire
   units, not real currency - the dashboard now converts using
   `real_value_multiplier` from `/status` (added there alongside

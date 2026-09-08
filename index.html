@@ -60,6 +60,17 @@
       <button class="secondary" id="resetDepositBtn">Reset session total</button>
     </div>
 
+    <div class="muted" style="margin-top:10px;">Cancel / return</div>
+    <div class="value" id="escrowValue">No note currently held in escrow.</div>
+    <div class="row">
+      <button id="rejectNoteBtn" disabled>Reject &amp; return current note</button>
+    </div>
+    <div class="muted">Only works on a note not yet stacked (within a few seconds of insertion). Once a note is credited/stacked it's physically inside the unit and can't be un-stacked - refund an equivalent amount instead:</div>
+    <div class="row">
+      <button class="secondary" id="refundDepositsBtn">Refund session deposits</button>
+    </div>
+    <div class="value" id="cancelReturnValue"></div>
+
     <div class="muted" style="margin-top:10px;">Cash withdrawal (capped to the last-checked balance)</div>
     <div class="row">
       <input id="payoutAmount" type="number" placeholder="Amount" style="width:90px;" />

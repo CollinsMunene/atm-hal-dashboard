@@ -279,6 +279,11 @@ ipcMain.handle('recycler:smartEmpty', async () => postRecycler('/smart-empty'));
 
 ipcMain.handle('recycler:halt', async () => postRecycler('/halt'));
 
+// Returns a note still held in escrow (before it's stacked) to the customer.
+// Only meaningful while a note is in that window - see server.py's
+// /reject-note docstring for why this can't un-stack an already-credited note.
+ipcMain.handle('recycler:rejectNote', async () => postRecycler('/reject-note'));
+
 // ---------- Printer: K80 raw-USB diagnostics (shells out to custom-k80-printer's
 // staged CLI, test_k80.py, since that package has no HTTP layer of its own; see the
 // integration summary for why this wasn't built as an HTTP client instead) ----------

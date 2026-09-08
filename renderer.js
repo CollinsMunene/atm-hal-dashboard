@@ -34,6 +34,11 @@ document.getElementById('logClear').onclick = () => {
   logBuffer = [];
   document.getElementById('log').innerHTML = '';
 };
+function forceShowLog() {
+  if (loggingEnabled) return;
+  document.getElementById('logToggle').checked = true;
+  document.getElementById('logToggle').dispatchEvent(new Event('change'));
+}
 
 function setDot(id, state) { // state: 'ok' | 'err' | 'pending'
   const el = document.getElementById(id);
@@ -82,6 +87,7 @@ let recyclerConnected = false;
 let recyclerChannelValue = null; // real-currency value per note channel, from /status
 let recyclerBalance = null;      // real-currency total, from the last "Check balance"
 let sessionDeposits = 0;         // running total of CREDIT_NOTE values this session
+let noteInEscrow = false;        // true only between READ_NOTE and its resolution (credited/stacked/rejected)
 
 function updateDepositDisplay() {
   document.getElementById('depositValue').textContent =
@@ -90,6 +96,42 @@ function updateDepositDisplay() {
 document.getElementById('resetDepositBtn').onclick = () => {
   sessionDeposits = 0;
   updateDepositDisplay();
+};
+
+function setEscrowState(inEscrow) {
+  noteInEscrow = inEscrow;
+  document.getElementById('rejectNoteBtn').disabled = !inEscrow;
+  document.getElementById('escrowValue').textContent = inEscrow
+    ? 'Note detected, not yet stacked - "Reject & return" will hand it back now.'
+    : 'No note currently held in escrow.';
+}
+
+document.getElementById('rejectNoteBtn').onclick = async () => {
+  const el = document.getElementById('cancelReturnValue');
+  if (!recyclerConnected) { el.textContent = 'Not connected.'; return; }
+  el.textContent = 'Rejecting...';
+  const result = await window.hal.rejectNote();
+  el.textContent = result.ok
+    ? 'Rejected - note should be returning to the customer now.'
+    : `Error: ${result.error} (if the note already stacked, this always fails - refund the deposit total instead)`;
+};
+
+document.getElementById('refundDepositsBtn').onclick = async () => {
+  const el = document.getElementById('cancelReturnValue');
+  if (!recyclerConnected) { el.textContent = 'Not connected.'; return; }
+  if (sessionDeposits <= 0) { el.textContent = 'No session deposits to refund.'; return; }
+  if (recyclerBalance == null) { el.textContent = 'Click "Check balance" first, so this can be capped to what\'s actually available.'; return; }
+  if (sessionDeposits > recyclerBalance) { el.textContent = `Refund amount exceeds available balance (max ${recyclerBalance} ${recyclerCountryCode}).`; return; }
+  if (!confirm(`Refund ${sessionDeposits} ${recyclerCountryCode} for real? This pays out an equivalent amount from the recycler's stock - not necessarily the same physical notes deposited.`)) return;
+  el.textContent = 'Refunding...';
+  const result = await window.hal.payout({ amount: sessionDeposits, currency: recyclerCountryCode, test: false });
+  if (result.ok) {
+    el.textContent = `Refund OK: ${JSON.stringify(result.result)}`;
+    sessionDeposits = 0;
+    updateDepositDisplay();
+  } else {
+    el.textContent = `Error: ${result.error}`;
+  }
 };
 
 document.getElementById('connectRecycler').onclick = async () => {
@@ -106,6 +148,8 @@ document.getElementById('connectRecycler').onclick = async () => {
     sessionDeposits = 0;
     recyclerBalance = null;
     document.getElementById('balanceValue').textContent = '';
+    document.getElementById('cancelReturnValue').textContent = '';
+    setEscrowState(false);
     updateDepositDisplay();
   } else {
     setDot('recyclerDot', 'err');
@@ -121,9 +165,23 @@ document.getElementById('disconnectRecycler').onclick = async () => {
   document.getElementById('balanceValue').textContent = '';
   recyclerConnected = false;
   recyclerBalance = null;
+  setEscrowState(false);
 };
 window.hal.onRecyclerEvent(({ name, result }) => {
   document.getElementById('recyclerValue').textContent = `Last event: ${name}`;
+
+  // Escrow tracking, for "Reject & return current note": READ_NOTE opens
+  // the window (the device holds the note, undecided); any of these close
+  // it - CREDIT_NOTE/NOTE_STACKED because it's now stacked and can't be
+  // un-stacked, NOTE_REJECTED/NOTE_REJECTING/NOTE_CLEARED_FROM_FRONT because
+  // it's already on its way back out (via the device's own validation
+  // logic, or our own REJECT_BANKNOTE call).
+  if (name === 'READ_NOTE') {
+    setEscrowState(true);
+  } else if (['CREDIT_NOTE', 'NOTE_STACKED', 'NOTE_REJECTED', 'NOTE_REJECTING', 'NOTE_CLEARED_FROM_FRONT'].includes(name)) {
+    setEscrowState(false);
+  }
+
   // Cash deposit tracking: CREDIT_NOTE carries a channel number, not a
   // currency value directly - look its real value up in channel_value
   // (from /status, already real-currency per SETUP_REQUEST's
@@ -146,6 +204,20 @@ window.hal.onRecyclerStatus((status) => {
       updateDepositDisplay();
     }
     if (status.channelValue) recyclerChannelValue = status.channelValue;
+  } else if (recyclerConnected) {
+    // The sidecar process died on its own (crash, unplugged device, etc.) -
+    // main.js detects the exit and sends this unprompted; previously this
+    // branch didn't exist at all, so the UI just kept showing "Connected"
+    // (recyclerConnected stayed stale true) until a button was clicked and
+    // failed with a bare "not connected" - confusing, and looked like a
+    // random failure rather than what it was: the service actually died.
+    recyclerConnected = false;
+    setDot('recyclerDot', 'err');
+    document.getElementById('recyclerValue').textContent =
+      status.error ? `Disconnected unexpectedly: ${status.error}` : 'Disconnected unexpectedly.';
+    setEscrowState(false);
+    log(`[recycler] connection lost${status.error ? `: ${status.error}` : ''} - check the log above for [recycler-svc] lines explaining why it exited`);
+    forceShowLog(); // this is exactly the moment you need to see why - don't make it opt-in here
   }
 });
 
