@@ -1,8 +1,9 @@
 # ATM HAL Dashboard
 
 A small bring-up tool: run it, and it shows live status for every peripheral the
-ATM platform needs to control - cash recycler, receipt printer, camera, and touch
-input - before any of that logic is buried inside the real kiosk app.
+ATM platform needs to control - cash recycler, receipt printer, camera, QR code
+scanner, and touch input - before any of that logic is buried inside the real
+kiosk app.
 
 ## Architecture
 
@@ -94,6 +95,19 @@ npm start
   the sidecar process - if the app quits or crashes without disconnecting first,
   it kills the sidecar too, but check for an orphaned `python server.py` process
   if something went wrong.
+  - **Denominations** - "Refresh denominations" calls the service's
+    `GET /denominations` (wraps `SSPClient.denominations()`) and shows known
+    denominations with current stock count and cashbox/payout routing, in real
+    currency units.
+  - **Payout / Float / Smart empty / Halt** - the amount fields take **real
+    currency** (e.g. `500` meaning 500 of whatever `/status`'s `country_code`
+    reports, KES on the units tested so far); the dashboard converts to the
+    wire units the service's `/payout` and `/float` endpoints actually expect
+    using `real_value_multiplier` from `/status`, the same conversion
+    `test_nv200.py`'s CLI does. Payout defaults to "test only" (confirms
+    feasibility, dispenses nothing) - untick it to move real cash, and you'll
+    get a confirmation prompt first. Float, smart-empty, and halt also confirm
+    before sending, since all three act on real cash-handling hardware.
 - **Printer (Windows spooler / raw ESC/POS)** - "Check Windows spooler" shows
   what Windows itself thinks (installed, online/offline). "Raw ESC/POS test
   print" bypasses the spooler entirely and sends print commands directly over
@@ -104,10 +118,23 @@ npm start
   `test_k80.py --list` and reports whether VID 0x0DD4/PID 0x0237 shows up.
   "Connectivity test" runs `test_k80.py --init` (sends `ESC @` over the native
   USB interface, bypassing the OS spooler/COM port entirely) - the printer
-  should visibly react (buzzer/motor) even though nothing prints. Needs the
+  should visibly react (buzzer/motor) even though nothing prints. "Selftest"
+  runs `test_k80.py --selftest`, a pure command/raster sanity check that needs
+  no hardware at all. "Text test", "Barcode", "QR code", "Sample receipt", and
+  "Cut (total/partial)" each shell out to the matching `test_k80.py` stage and
+  should visibly print on real hardware. "Print image..." opens a file picker
+  and runs `test_k80.py --image <path>` against whatever you pick (requires
+  Pillow, per `custom-k80-printer`'s own requirements). All of this needs the
   Zadig WinUSB binding done first (see Setup above).
 - **Camera** - "Start preview" just calls `getUserMedia()` - if you see a live
   picture, Electron has full access to the camera, same as the kiosk app will.
+- **QR Code Scanner** - has its own device dropdown (Refresh to (re)enumerate,
+  labels only populate once camera permission has been granted once) since a
+  dedicated QR-scanning camera is often a separate UVC device from the general
+  preview camera above. "Start scanning" opens that camera and decodes frames
+  roughly 5x/second using `jsqr`; a live decode shows the payload text and logs
+  it. Decoding runs in `preload.js` (not `renderer.js`), since the renderer has
+  no Node access to `require('jsqr')` directly under `contextIsolation`.
 - **Touch** - tap the tile; it should flash and count up immediately. Confirms
   the touchscreen behaves as ordinary pointer input, which is all Electron needs.
 
@@ -116,10 +143,11 @@ while debugging the recycler handshake or a sidecar that fails to start.
 
 ## Known open items
 
-- `nv200-smart-payout`'s `/payout` and `/float` endpoints take **raw wire
-  units**, not KES - the dashboard doesn't currently expose a payout control, but
-  if one gets added, it must apply the service's `real_value_multiplier`
-  conversion itself (the CLI tool does this; the REST API doesn't).
+- `nv200-smart-payout`'s `/payout` and `/float` endpoints still take raw wire
+  units, not real currency - the dashboard now converts using
+  `real_value_multiplier` from `/status` (added there alongside
+  `GET /denominations` specifically to support this), the same conversion the
+  CLI tool does.
 - The `real_value_multiplier` scaling assumption behind that conversion is
   itself unconfirmed against the primary ITL protocol spec (one empirical data
   point only) - don't trust real-money payout amounts until that's verified.

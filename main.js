@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const { exec, spawn, execFile } = require('child_process');
 const { SerialPort } = require('serialport');
@@ -59,6 +59,11 @@ async function resolvePython(envVarName) {
 let mainWindow;
 let recyclerProc = null;
 let recyclerEventSource = null;
+// Denomination metadata from /status (real_value_multiplier, country_code,
+// channel_value, number_of_channels) - needed to convert real currency
+// amounts into the wire units /payout and /float expect. Refreshed on
+// every connect and every /status-backed response.
+let recyclerInfo = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -107,6 +112,7 @@ function killRecyclerProcess() {
     try { recyclerProc.kill(); } catch (_) {}
     recyclerProc = null;
   }
+  recyclerInfo = null;
 }
 
 async function waitForRecyclerUp(timeoutMs = 15000) {
@@ -160,6 +166,7 @@ ipcMain.handle('recycler:connect', async (event, { port }) => {
     });
 
     const status = await waitForRecyclerUp();
+    recyclerInfo = status;
     send('log', `[recycler] service up - protocol v${status.protocol_version}, unit ${status.unit_type}`);
 
     const enableRes = await fetch(`${NV200_BASE_URL}/enable`, { method: 'POST' });
@@ -188,6 +195,9 @@ ipcMain.handle('recycler:connect', async (event, { port }) => {
       protocolVersion: status.protocol_version,
       unitType: status.unit_type,
       encrypted: status.encrypted,
+      countryCode: status.country_code,
+      realValueMultiplier: status.real_value_multiplier,
+      channelValue: status.channel_value,
     });
     return { ok: true, protocolVersion: status.protocol_version, unitType: status.unit_type };
   } catch (err) {
@@ -206,6 +216,68 @@ ipcMain.handle('recycler:disconnect', async () => {
   send('recycler:status', { connected: false });
   return { ok: true };
 });
+
+// ---------- Recycler: denominations (stock + routing, in real currency units) ----------
+ipcMain.handle('recycler:denominations', async () => {
+  if (!recyclerProc) return { ok: false, error: 'not connected' };
+  try {
+    const res = await fetch(`${NV200_BASE_URL}/denominations`);
+    const body = await res.json();
+    if (!res.ok || body.success === false) throw new Error(body.error || 'denominations request failed');
+    return { ok: true, denominations: body.denominations };
+  } catch (err) {
+    send('log', `[recycler] denominations failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+});
+
+// ---------- Recycler: cash-moving commands ----------
+// /payout and /float on the sidecar take raw wire units, not real currency
+// (see server.py's docstring) - convert here using real_value_multiplier
+// from /status, the same conversion test_nv200.py's CLI does client-side.
+function toWireAmount(realAmount) {
+  const mult = (recyclerInfo && recyclerInfo.real_value_multiplier) || 1;
+  return Math.round(Number(realAmount) * mult);
+}
+
+async function postRecycler(path, body) {
+  if (!recyclerProc) return { ok: false, error: 'not connected' };
+  try {
+    const res = await fetch(`${NV200_BASE_URL}${path}`, {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const result = await res.json();
+    if (!res.ok || result.success === false) {
+      throw new Error(result.error || `${path} failed`);
+    }
+    send('log', `[recycler] ${path} -> ${JSON.stringify(result)}`);
+    return { ok: true, result };
+  } catch (err) {
+    send('log', `[recycler] ${path} failed: ${err.message}`);
+    return { ok: false, error: err.message };
+  }
+}
+
+ipcMain.handle('recycler:payout', async (event, { amount, currency, test }) => {
+  const wireAmount = toWireAmount(amount);
+  const countryCode = currency || (recyclerInfo && recyclerInfo.country_code) || 'USD';
+  send('log', `[recycler] payout ${amount} ${countryCode} -> wire amount ${wireAmount}${test ? ' (test)' : ''}`);
+  return postRecycler('/payout', { amount: wireAmount, country_code: countryCode, test: !!test });
+});
+
+ipcMain.handle('recycler:float', async (event, { amount, minPossiblePayout, currency, test }) => {
+  const wireAmount = toWireAmount(amount);
+  const wireMin = minPossiblePayout ? toWireAmount(minPossiblePayout) : 0;
+  const countryCode = currency || (recyclerInfo && recyclerInfo.country_code) || 'USD';
+  send('log', `[recycler] float ${amount} ${countryCode} -> wire amount ${wireAmount}${test ? ' (test)' : ''}`);
+  return postRecycler('/float', { amount: wireAmount, min_possible_payout: wireMin, country_code: countryCode, test: !!test });
+});
+
+ipcMain.handle('recycler:smartEmpty', async () => postRecycler('/smart-empty'));
+
+ipcMain.handle('recycler:halt', async () => postRecycler('/halt'));
 
 // ---------- Printer: Windows spooler status ----------
 ipcMain.handle('printer:listWindows', async () => {
@@ -278,5 +350,55 @@ ipcMain.handle('printer:k80ListDevices', async () => {
 ipcMain.handle('printer:k80Init', async () => {
   const result = await runK80Test(['--init']);
   send('log', result.ok ? '[k80] init OK (ESC @ sent)' : `[k80] init failed: ${result.error}`);
+  return result;
+});
+
+ipcMain.handle('printer:k80Selftest', async () => {
+  const result = await runK80Test(['--selftest']);
+  send('log', result.ok ? '[k80] selftest passed (no hardware needed)' : `[k80] selftest failed: ${result.error}`);
+  return result;
+});
+
+ipcMain.handle('printer:k80Text', async () => {
+  const result = await runK80Test(['--text']);
+  send('log', result.ok ? '[k80] text formatting block sent' : `[k80] text test failed: ${result.error}`);
+  return result;
+});
+
+ipcMain.handle('printer:k80Barcode', async () => {
+  const result = await runK80Test(['--barcode']);
+  send('log', result.ok ? '[k80] CODE128 barcode sent' : `[k80] barcode test failed: ${result.error}`);
+  return result;
+});
+
+ipcMain.handle('printer:k80Qrcode', async () => {
+  const result = await runK80Test(['--qrcode']);
+  send('log', result.ok ? '[k80] QR code sent' : `[k80] QR code test failed: ${result.error}`);
+  return result;
+});
+
+ipcMain.handle('printer:k80Cut', async (event, { mode }) => {
+  const cutMode = mode === 'partial' ? 'partial' : 'total';
+  const result = await runK80Test(['--cut', cutMode]);
+  send('log', result.ok ? `[k80] ${cutMode} cut sent` : `[k80] cut failed: ${result.error}`);
+  return result;
+});
+
+ipcMain.handle('printer:k80Receipt', async () => {
+  const result = await runK80Test(['--receipt']);
+  send('log', result.ok ? '[k80] sample deposit receipt sent' : `[k80] receipt test failed: ${result.error}`);
+  return result;
+});
+
+ipcMain.handle('printer:k80Image', async () => {
+  if (!mainWindow) return { ok: false, error: 'no window' };
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select an image to print on the K80',
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'bmp', 'gif'] }],
+    properties: ['openFile'],
+  });
+  if (canceled || !filePaths.length) return { ok: false, error: 'cancelled' };
+  const result = await runK80Test(['--image', filePaths[0]]);
+  send('log', result.ok ? `[k80] image ${filePaths[0]} sent` : `[k80] image test failed: ${result.error}`);
   return result;
 });

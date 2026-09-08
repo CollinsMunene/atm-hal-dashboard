@@ -43,6 +43,25 @@
       <button class="secondary" id="disconnectRecycler">Disconnect</button>
     </div>
     <div class="value" id="recyclerValue">Not connected.</div>
+
+    <div class="row" style="margin-top:10px;">
+      <button class="secondary" id="refreshDenominations">Refresh denominations</button>
+    </div>
+    <div class="value" id="denominationsValue"></div>
+
+    <div class="row" style="margin-top:10px;">
+      <input id="payoutAmount" type="number" placeholder="Amount" style="width:90px;" />
+      <input id="payoutCurrency" type="text" placeholder="Currency" style="width:70px;" maxlength="3" />
+      <label class="muted"><input type="checkbox" id="payoutTest" checked /> test only</label>
+      <button id="payoutBtn">Payout</button>
+    </div>
+    <div class="row">
+      <input id="floatAmount" type="number" placeholder="Amount" style="width:90px;" />
+      <button id="floatBtn">Float</button>
+      <button class="secondary" id="smartEmptyBtn">Smart empty</button>
+      <button class="secondary" id="haltBtn">Halt</button>
+    </div>
+    <div class="value" id="payoutValue"></div>
   </div>
 
   <div class="card">
@@ -60,6 +79,18 @@
       <span class="dot pending" id="k80Dot"></span>
       <button id="k80List">K80: list USB devices</button>
       <button id="k80Init">K80: connectivity test</button>
+      <button class="secondary" id="k80Selftest">K80: selftest (no HW)</button>
+    </div>
+    <div class="row">
+      <button id="k80Text">Text test</button>
+      <button id="k80Barcode">Barcode</button>
+      <button id="k80Qrcode">QR code</button>
+      <button id="k80Receipt">Sample receipt</button>
+    </div>
+    <div class="row">
+      <button id="k80CutTotal">Cut (total)</button>
+      <button id="k80CutPartial">Cut (partial)</button>
+      <button class="secondary" id="k80Image">Print image...</button>
     </div>
     <div class="value" id="k80Value"></div>
   </div>
@@ -68,6 +99,21 @@
     <h2><span class="dot pending" id="cameraDot"></span> Camera (UVC)</h2>
     <div class="row"><button id="startCamera">Start preview</button></div>
     <video id="cameraPreview" autoplay muted></video>
+  </div>
+
+  <div class="card">
+    <h2><span class="dot pending" id="qrDot"></span> QR Code Scanner</h2>
+    <div class="row">
+      <select id="qrDeviceSelect"></select>
+      <button class="secondary" id="qrRefreshDevices">Refresh</button>
+    </div>
+    <div class="row">
+      <button id="qrStart">Start scanning</button>
+      <button class="secondary" id="qrStop">Stop</button>
+    </div>
+    <video id="qrPreview" autoplay muted></video>
+    <canvas id="qrCanvas" style="display:none;"></canvas>
+    <div class="value" id="qrValue">Not scanning.</div>
   </div>
 
   <div class="card">
