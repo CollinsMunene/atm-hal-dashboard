@@ -185,6 +185,16 @@ turning it on shows recent history, not just what happens from then on;
 
 ## Known open items
 
+- Fixed (not open anymore, noted for context): reconnecting to the recycler
+  (or double-clicking Connect) could spawn a new `server.py` before the old
+  one had actually released the COM port - `.kill()` returns as soon as the
+  signal/`TerminateProcess` call is issued, not once the OS (and, through a
+  USB-serial bridge, its driver) has actually finished releasing the port
+  handle. This showed up as "Access is denied" on the new open. Fixed by
+  waiting for the old process to actually exit (plus a short grace delay)
+  before spawning the new one, and guarding against two overlapping connects
+  entirely (both server-side in `main.js` and by disabling the Connect button
+  while one's in flight).
 - Fixed (not open anymore, noted for context): `nv200-smart-payout`'s
   `client.command()` used to raise on any failure with nothing catching it in
   `server.py`, so Flask returned an HTML 500 page that the dashboard's

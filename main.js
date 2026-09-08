@@ -80,10 +80,19 @@ function createWindow() {
 
 app.whenReady().then(createWindow);
 app.on('window-all-closed', () => {
-  killRecyclerProcess();
   if (process.platform !== 'darwin') app.quit();
 });
-app.on('before-quit', killRecyclerProcess);
+// Cleanup now waits for the port to actually be released (see
+// killRecyclerProcess) before the app is allowed to quit - otherwise a
+// quick relaunch could hit the exact same "Access is denied" race this was
+// written to fix in the first place.
+let quitting = false;
+app.on('before-quit', (event) => {
+  if (quitting || !recyclerProc) return;
+  event.preventDefault();
+  quitting = true;
+  killRecyclerProcess().then(() => app.quit());
+});
 
 function send(channel, payload) {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
@@ -103,16 +112,41 @@ ipcMain.handle('ports:list', async () => {
 // service; encryption is always-on in server.py's startup(), so there's no
 // "useEncryption" toggle anymore).
 
+// Returns a Promise that resolves only once the old process has actually
+// exited (plus a short grace delay - see below), not just once .kill() has
+// been called. This matters: .kill() returns as soon as the signal/
+// TerminateProcess call is issued, not once the OS has finished tearing the
+// process down - and closing a COM port, especially through a USB-serial
+// bridge driver, can lag a beat behind that. Reconnecting (or spawning a
+// second server.py before the first one's port handle is truly released)
+// used to race this and fail with "Access is denied" on the new open.
 function killRecyclerProcess() {
   if (recyclerEventSource) {
     try { recyclerEventSource.close(); } catch (_) {}
     recyclerEventSource = null;
   }
-  if (recyclerProc) {
-    try { recyclerProc.kill(); } catch (_) {}
-    recyclerProc = null;
-  }
   recyclerInfo = null;
+
+  const proc = recyclerProc;
+  recyclerProc = null;
+  if (!proc) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      setTimeout(resolve, 400); // grace period for the OS/driver to fully release the port
+    };
+    proc.once('exit', finish);
+    try {
+      proc.kill();
+    } catch (_) {
+      finish();
+      return;
+    }
+    setTimeout(finish, 3000); // don't hang forever if it's wedged and never emits 'exit'
+  });
 }
 
 async function waitForRecyclerUp(timeoutMs = 15000) {
@@ -132,8 +166,27 @@ async function waitForRecyclerUp(timeoutMs = 15000) {
   throw new Error('timed out waiting for recycler service to become ready');
 }
 
+// Guards against two overlapping recycler:connect calls (e.g. a double
+// Connect click) both seeing "nothing to kill" and spawning two server.py
+// processes at once, each trying to open the same COM port - awaiting
+// killRecyclerProcess() alone doesn't prevent that, since both invocations
+// could start before either has anything to kill yet.
+let recyclerConnectInFlight = false;
+
 ipcMain.handle('recycler:connect', async (event, { port }) => {
-  killRecyclerProcess();
+  if (recyclerConnectInFlight) {
+    return { ok: false, error: 'a connect is already in progress - wait for it to finish' };
+  }
+  recyclerConnectInFlight = true;
+  try {
+    return await doRecyclerConnect(port);
+  } finally {
+    recyclerConnectInFlight = false;
+  }
+});
+
+async function doRecyclerConnect(port) {
+  await killRecyclerProcess();
   let stderrTail = '';
 
   try {
@@ -201,18 +254,18 @@ ipcMain.handle('recycler:connect', async (event, { port }) => {
     });
     return { ok: true, protocolVersion: status.protocol_version, unitType: status.unit_type };
   } catch (err) {
-    killRecyclerProcess();
+    await killRecyclerProcess();
     send('recycler:status', { connected: false, error: err.message });
     send('log', `[recycler] connect failed: ${err.message}`);
     return { ok: false, error: err.message };
   }
-});
+}
 
 ipcMain.handle('recycler:disconnect', async () => {
   if (recyclerProc) {
     try { await fetch(`${NV200_BASE_URL}/disable`, { method: 'POST' }); } catch (_) {}
   }
-  killRecyclerProcess();
+  await killRecyclerProcess();
   send('recycler:status', { connected: false });
   return { ok: true };
 });

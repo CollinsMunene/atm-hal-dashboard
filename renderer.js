@@ -134,27 +134,37 @@ document.getElementById('refundDepositsBtn').onclick = async () => {
   }
 };
 
+// Disabled while connecting/connected so a double-click (or clicking Connect
+// again without disconnecting first) can't fire two overlapping connects -
+// main.js also guards against this server-side, but doing it here too means
+// a normal user never sees the resulting "already in progress" error at all.
 document.getElementById('connectRecycler').onclick = async () => {
   const port = document.getElementById('recyclerPort').value;
   if (!port) { log('[recycler] no port selected'); return; }
+  const connectBtn = document.getElementById('connectRecycler');
+  connectBtn.disabled = true;
   setDot('recyclerDot', 'pending');
   log(`[recycler] starting recycler service on ${port}...`);
-  const result = await window.hal.connectRecycler({ port });
-  if (result.ok) {
-    setDot('recyclerDot', 'ok');
-    document.getElementById('recyclerValue').textContent =
-      `Connected - protocol v${result.protocolVersion}, unit "${result.unitType}"`;
-    recyclerConnected = true;
-    sessionDeposits = 0;
-    recyclerBalance = null;
-    document.getElementById('balanceValue').textContent = '';
-    document.getElementById('cancelReturnValue').textContent = '';
-    setEscrowState(false);
-    updateDepositDisplay();
-  } else {
-    setDot('recyclerDot', 'err');
-    document.getElementById('recyclerValue').textContent = `Failed: ${result.error}`;
-    recyclerConnected = false;
+  try {
+    const result = await window.hal.connectRecycler({ port });
+    if (result.ok) {
+      setDot('recyclerDot', 'ok');
+      document.getElementById('recyclerValue').textContent =
+        `Connected - protocol v${result.protocolVersion}, unit "${result.unitType}"`;
+      recyclerConnected = true;
+      sessionDeposits = 0;
+      recyclerBalance = null;
+      document.getElementById('balanceValue').textContent = '';
+      document.getElementById('cancelReturnValue').textContent = '';
+      setEscrowState(false);
+      updateDepositDisplay();
+    } else {
+      setDot('recyclerDot', 'err');
+      document.getElementById('recyclerValue').textContent = `Failed: ${result.error}`;
+      recyclerConnected = false;
+    }
+  } finally {
+    connectBtn.disabled = false;
   }
 };
 document.getElementById('disconnectRecycler').onclick = async () => {
