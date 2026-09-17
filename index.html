@@ -23,8 +23,11 @@
   #touchTile { height:80px; display:flex; align-items:center; justify-content:center; border:2px dashed var(--border); border-radius:8px; font-size:14px; user-select:none; transition: background 0.15s; }
   #touchTile.hit { background:var(--ok); border-color:var(--ok); }
   video { width:100%; border-radius:8px; background:#000; margin-top:8px; }
-  #log { grid-column: 1 / -1; background:#0B0D10; border:1px solid var(--border); border-radius:10px; padding:12px; height:180px; overflow-y:auto; font-family: Consolas, monospace; font-size:12px; color:#9CDCFE; }
+  .log-wrap { grid-column: 1 / -1; }
+  #log { background:#0B0D10; border:1px solid var(--border); border-radius:10px; padding:12px; height:180px; overflow-y:auto; font-family: Consolas, monospace; font-size:12px; color:#9CDCFE; }
   #log div { margin-bottom:2px; }
+  #qrHistory { max-height:110px; overflow-y:auto; font-family: Consolas, monospace; font-size:12px; }
+  #qrHistory div { margin-bottom:2px; }
 </style>
 </head>
 <body>
@@ -43,23 +46,65 @@
       <button class="secondary" id="disconnectRecycler">Disconnect</button>
     </div>
     <div class="value" id="recyclerValue">Not connected.</div>
+
+    <div class="row" style="margin-top:10px;">
+      <button class="secondary" id="refreshDenominations">Refresh denominations</button>
+      <button class="secondary" id="checkBalanceBtn">Check balance</button>
+    </div>
+    <div class="value" id="denominationsValue"></div>
+    <div class="value" id="balanceValue"></div>
+
+    <div class="muted" style="margin-top:10px;">Cash deposit (accepted automatically while connected)</div>
+    <div class="value" id="depositValue">Session deposits: 0</div>
+    <div class="row">
+      <button class="secondary" id="resetDepositBtn">Reset session total</button>
+    </div>
+
+    <div class="muted" style="margin-top:10px;">Cancel / return</div>
+    <div class="value" id="escrowValue">No note currently held in escrow.</div>
+    <div class="row">
+      <button id="rejectNoteBtn" disabled>Reject &amp; return current note</button>
+    </div>
+    <div class="muted">Only works on a note not yet stacked (within a few seconds of insertion). Once a note is credited/stacked it's physically inside the unit and can't be un-stacked - refund an equivalent amount instead:</div>
+    <div class="row">
+      <button class="secondary" id="refundDepositsBtn">Refund session deposits</button>
+    </div>
+    <div class="value" id="cancelReturnValue"></div>
+
+    <div class="muted" style="margin-top:10px;">Cash withdrawal (capped to the last-checked balance)</div>
+    <div class="row">
+      <input id="payoutAmount" type="number" placeholder="Amount" style="width:90px;" />
+      <input id="payoutCurrency" type="text" placeholder="Currency" style="width:70px;" maxlength="3" />
+      <label class="muted"><input type="checkbox" id="payoutTest" checked /> test only</label>
+      <button id="payoutBtn">Payout</button>
+    </div>
+    <div class="row">
+      <input id="floatAmount" type="number" placeholder="Amount" style="width:90px;" />
+      <button id="floatBtn">Float</button>
+      <button class="secondary" id="smartEmptyBtn">Smart empty</button>
+      <button class="secondary" id="haltBtn">Halt</button>
+    </div>
+    <div class="value" id="payoutValue"></div>
   </div>
 
   <div class="card">
-    <h2><span class="dot pending" id="printerDot"></span> Receipt Printer</h2>
+    <h2><span class="dot pending" id="k80Dot"></span> Receipt Printer (K80, raw USB)</h2>
+    <div class="muted">Native USB (VID 0x0DD4/PID 0x0237) - no COM port or Windows spooler involved.</div>
+    <div class="row" style="margin-top:10px;">
+      <button id="k80List">List USB devices</button>
+      <button id="k80Init">Connectivity test</button>
+      <button class="secondary" id="k80Selftest">Selftest (no HW)</button>
+    </div>
     <div class="row">
-      <button id="checkWindowsPrinter">Check Windows spooler</button>
+      <button id="k80Text">Text test</button>
+      <button id="k80Barcode">Barcode</button>
+      <button id="k80Qrcode">QR code</button>
+      <button id="k80Receipt">Sample receipt</button>
     </div>
-    <div class="value" id="printerWinValue">Not checked yet.</div>
-    <div class="row" style="margin-top:10px;">
-      <select id="printerPort"></select>
-      <button id="rawTestPrint">Raw ESC/POS test print</button>
-    </div>
-    <div class="value" id="printerRawValue"></div>
-    <div class="row" style="margin-top:10px;">
-      <span class="dot pending" id="k80Dot"></span>
-      <button id="k80List">K80: list USB devices</button>
-      <button id="k80Init">K80: connectivity test</button>
+    <div class="row">
+      <button id="k80CutTotal">Cut (total)</button>
+      <button id="k80CutPartial">Cut (partial)</button>
+      <button class="secondary" id="k80Image">Print image...</button>
     </div>
     <div class="value" id="k80Value"></div>
   </div>
@@ -71,15 +116,42 @@
   </div>
 
   <div class="card">
+    <h2><span class="dot pending" id="qrDot"></span> QR Code Scanner</h2>
+    <div class="row">
+      <select id="qrDeviceSelect"></select>
+      <button class="secondary" id="qrRefreshDevices">Refresh</button>
+    </div>
+    <div class="row">
+      <button id="qrStart">Start scanning</button>
+      <button class="secondary" id="qrStop">Stop</button>
+    </div>
+    <video id="qrPreview" autoplay muted></video>
+    <canvas id="qrCanvas" style="display:none;"></canvas>
+    <div class="value" id="qrValue">Not scanning.</div>
+    <div class="row" style="margin-top:8px;">
+      <span class="muted">Decode history</span>
+      <button class="secondary" id="qrHistoryClear">Clear</button>
+    </div>
+    <div id="qrHistory"></div>
+  </div>
+
+  <div class="card">
     <h2><span class="dot pending" id="touchDot"></span> Touchscreen / Input</h2>
     <div class="muted">Tap or click the box below - it should flash green immediately.</div>
     <div id="touchTile" style="margin-top:10px;">Tap here</div>
     <div class="value" id="touchValue">Taps registered: 0</div>
   </div>
 
-  <div id="log"></div>
+  <div class="log-wrap">
+    <div class="row">
+      <label class="muted"><input type="checkbox" id="logToggle" /> Show live log</label>
+      <button class="secondary" id="logClear">Clear log</button>
+    </div>
+    <div id="log">Logging is off - tick "Show live log" above to view activity as it happens.</div>
+  </div>
 </div>
 
+<script src="vendor/jsQR.js"></script>
 <script src="renderer.js"></script>
 </body>
 </html>
